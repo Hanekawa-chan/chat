@@ -41,7 +41,10 @@ func (s *chatServiceServer) JoinChannel(ch *protoc.Channel, msgStream protoc.Cha
 			return nil
 		case msg := <-msgChannel:
 			fmt.Printf("GO ROUTINE (got message): %v \n", msg)
-			msgStream.Send(msg)
+			err := msgStream.Send(msg)
+			if err != nil {
+				return err
+			}
 		}
 	}
 }
