@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/Hanekawa-chan/chat/protoc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"io"
@@ -9,7 +10,6 @@ import (
 	"net"
 	"sync"
 
-	"github.com/Hanekawa-chan/chat/protoc"
 	"google.golang.org/grpc"
 )
 
@@ -75,7 +75,8 @@ func (s *chatServiceServer) SendMessage(msgStream protoc.ChatService_SendMessage
 
 func newServer() *chatServiceServer {
 	s := &chatServiceServer{
-		channel: make(map[string][]chan *protoc.Message),
+		channel:  make(map[string][]chan *protoc.Message),
+		password: make(map[string]string),
 	}
 	fmt.Println(s)
 	return s

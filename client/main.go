@@ -123,8 +123,6 @@ func main() {
 			}
 			channelName = channel.Name
 			senderName = channel.SendersName
-			fmt.Println("channelName " + channelName)
-			fmt.Println("senderName " + senderName)
 			go joinChannel(ctx, client, &channel)
 		}
 	}
