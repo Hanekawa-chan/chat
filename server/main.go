@@ -2,27 +2,39 @@ package main
 
 import (
 	"fmt"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"io"
 	"log"
 	"net"
 	"sync"
 
-	"google.golang.org/grpc"
 	"github.com/Hanekawa-chan/chat/protoc"
+	"google.golang.org/grpc"
 )
 
 type chatServiceServer struct {
 	protoc.UnimplementedChatServiceServer
-	mu      sync.Mutex
-	channel map[string][]chan *chatpb.Message
+	mu       sync.Mutex
+	channel  map[string][]chan *protoc.Message
+	password map[string]string
 }
 
-func (s *chatServiceServer) JoinChannel(ch *chatpb.Channel, msgStream chatpb.ChatService_JoinChannelServer) error {
+func (s *chatServiceServer) JoinChannel(ch *protoc.Channel, msgStream protoc.ChatService_JoinChannelServer) error {
 
-	msgChannel := make(chan *chatpb.Message)
-	s.channel[ch.Name] = append(s.channel[ch.Name], msgChannel)
+	msgChannel := make(chan *protoc.Message)
+	password := ch.Password
+	if s.channel[ch.Name] != nil {
+		if s.password[ch.Name] == password {
+			s.channel[ch.Name] = append(s.channel[ch.Name], msgChannel)
+		} else {
+			return status.Errorf(codes.Unauthenticated, "wrong password")
+		}
+	} else {
+		s.channel[ch.Name] = append(s.channel[ch.Name], msgChannel)
+		s.password[ch.Name] = password
+	}
 
-	// doing this never closes the stream
 	for {
 		select {
 		case <-msgStream.Context().Done():
@@ -34,7 +46,7 @@ func (s *chatServiceServer) JoinChannel(ch *chatpb.Channel, msgStream chatpb.Cha
 	}
 }
 
-func (s *chatServiceServer) SendMessage(msgStream chatpb.ChatService_SendMessageServer) error {
+func (s *chatServiceServer) SendMessage(msgStream protoc.ChatService_SendMessageServer) error {
 	msg, err := msgStream.Recv()
 
 	if err == io.EOF {
@@ -45,8 +57,11 @@ func (s *chatServiceServer) SendMessage(msgStream chatpb.ChatService_SendMessage
 		return err
 	}
 
-	ack := chatpb.MessageAck{Status: "SENT"}
-	msgStream.SendAndClose(&ack)
+	ack := protoc.MessageAck{Status: "SENT"}
+	err = msgStream.SendAndClose(&ack)
+	if err != nil {
+		return err
+	}
 
 	go func() {
 		streams := s.channel[msg.Channel.Name]
@@ -60,7 +75,7 @@ func (s *chatServiceServer) SendMessage(msgStream chatpb.ChatService_SendMessage
 
 func newServer() *chatServiceServer {
 	s := &chatServiceServer{
-		channel: make(map[string][]chan *chatpb.Message),
+		channel: make(map[string][]chan *protoc.Message),
 	}
 	fmt.Println(s)
 	return s
@@ -75,6 +90,9 @@ func main() {
 
 	var opts []grpc.ServerOption
 	grpcServer := grpc.NewServer(opts...)
-	chatpb.RegisterChatServiceServer(grpcServer, newServer())
-	grpcServer.Serve(lis)
+	protoc.RegisterChatServiceServer(grpcServer, newServer())
+	err = grpcServer.Serve(lis)
+	if err != nil {
+		return
+	}
 }

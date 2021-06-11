@@ -5,6 +5,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/Hanekawa-chan/chat/protoc"
 	"io"
 	"log"
 	"os"
@@ -12,19 +13,17 @@ import (
 	"google.golang.org/grpc"
 )
 
-var channelName = flag.String("channel", "default", "Channel name for chatting")
-var senderName = flag.String("sender", "default", "Senders name")
 var tcpServer = flag.String("server", ":5400", "Tcp server")
+var channelName, senderName string
 
-func joinChannel(ctx context.Context, client chatpb.ChatServiceClient) {
+func joinChannel(ctx context.Context, client protoc.ChatServiceClient, channel *protoc.Channel) {
 
-	channel := chatpb.Channel{Name: *channelName, SendersName: *senderName}
-	stream, err := client.JoinChannel(ctx, &channel)
+	stream, err := client.JoinChannel(ctx, channel)
 	if err != nil {
 		log.Fatalf("client.JoinChannel(ctx, &channel) throws: %v", err)
 	}
 
-	fmt.Printf("Joined channel: %v \n", *channelName)
+	fmt.Printf("Joined channel: %v \n", channel.Name)
 
 	waitc := make(chan struct{})
 
@@ -39,7 +38,7 @@ func joinChannel(ctx context.Context, client chatpb.ChatServiceClient) {
 				log.Fatalf("Failed to receive message from channel joining. \nErr: %v", err)
 			}
 
-			if *senderName != in.Sender {
+			if channel.SendersName != in.Sender {
 				fmt.Printf("MESSAGE: (%v) -> %v \n", in.Sender, in.Message)
 			}
 		}
@@ -48,19 +47,22 @@ func joinChannel(ctx context.Context, client chatpb.ChatServiceClient) {
 	<-waitc
 }
 
-func sendMessage(ctx context.Context, client chatpb.ChatServiceClient, message string) {
+func sendMessage(ctx context.Context, client protoc.ChatServiceClient, message string) {
 	stream, err := client.SendMessage(ctx)
 	if err != nil {
 		log.Printf("Cannot send message: error: %v", err)
 	}
-	msg := chatpb.Message{
-		Channel: &chatpb.Channel{
-			Name:        *channelName,
-			SendersName: *senderName},
+	msg := protoc.Message{
+		Channel: &protoc.Channel{
+			Name:        channelName,
+			SendersName: senderName},
 		Message: message,
-		Sender:  *senderName,
+		Sender:  senderName,
 	}
-	stream.Send(&msg)
+	err = stream.Send(&msg)
+	if err != nil {
+		return
+	}
 
 	ack, err := stream.CloseAndRecv()
 	fmt.Printf("Message sent: %v \n", ack)
@@ -79,16 +81,51 @@ func main() {
 		log.Fatalf("Fail to dail: %v", err)
 	}
 
-	defer conn.Close()
+	defer func(conn *grpc.ClientConn) {
+		err := conn.Close()
+		if err != nil {
+
+		}
+	}(conn)
 
 	ctx := context.Background()
-	client := chatpb.NewChatServiceClient(conn)
-
-	go joinChannel(ctx, client)
+	client := protoc.NewChatServiceClient(conn)
 
 	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
-		go sendMessage(ctx, client, scanner.Text())
-	}
+	channel := protoc.Channel{}
 
+	for {
+		if channelName != "" {
+			for scanner.Scan() {
+				if scanner.Text() == "/" {
+					channelName = ""
+					senderName = ""
+					break
+				} else {
+					go sendMessage(ctx, client, scanner.Text())
+				}
+			}
+		} else {
+			fmt.Println("Enter channel name")
+			for scanner.Scan() {
+				channel.Name = scanner.Text()
+				break
+			}
+			fmt.Println("Enter your name")
+			for scanner.Scan() {
+				channel.SendersName = scanner.Text()
+				break
+			}
+			fmt.Println("Enter password for channel")
+			for scanner.Scan() {
+				channel.Password = scanner.Text()
+				break
+			}
+			channelName = channel.Name
+			senderName = channel.SendersName
+			fmt.Println("channelName " + channelName)
+			fmt.Println("senderName " + senderName)
+			go joinChannel(ctx, client, &channel)
+		}
+	}
 }
